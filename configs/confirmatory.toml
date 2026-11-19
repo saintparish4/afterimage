@@ -50,5 +50,11 @@ eps_id_aff_nll = nan   # <pilot>
 eps_id_acc = 0.002     # floor; raised if the pilot's N-vs-C spread is larger
 delta_G = nan          # <pilot>
 
+[gate]
+# Pilot gate run 2 (2026-11-19): seeds that learned the familiar task best also
+# generalized best (held-out 0.97-0.98), so a 0.97 cap rejected the best-trained
+# seeds (1 of 4 passed). 0.99 still rejects a true ceiling.
+ood_acc_high = 0.99
+
 [runtime]
 device = "cuda"
