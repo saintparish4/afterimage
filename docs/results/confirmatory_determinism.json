@@ -1,0 +1,51 @@
+{
+  "device": "cuda (NVIDIA GeForce RTX 3090), cuda (NVIDIA GeForce RTX 4090), cuda (NVIDIA RTX PRO 4000 Blackwell), cuda (NVIDIA RTX PRO 4500 Blackwell)",
+  "devices": [
+    {
+      "device": "cuda",
+      "digests": {
+        "first": "33a64dc93adc6b312d3605bd6ece4fdf60ac2ec0d03eea747a58dbc7b4c2b9d1",
+        "resumed": "33a64dc93adc6b312d3605bd6ece4fdf60ac2ec0d03eea747a58dbc7b4c2b9d1",
+        "second": "33a64dc93adc6b312d3605bd6ece4fdf60ac2ec0d03eea747a58dbc7b4c2b9d1"
+      },
+      "gpu_name": "NVIDIA GeForce RTX 4090",
+      "passed": true,
+      "source": "runs_remote/A"
+    },
+    {
+      "device": "cuda",
+      "digests": {
+        "first": "f506672af6654d3173babc0ad06f9450363879fe5ae7e085c4b8a7ac3c52e591",
+        "resumed": "f506672af6654d3173babc0ad06f9450363879fe5ae7e085c4b8a7ac3c52e591",
+        "second": "f506672af6654d3173babc0ad06f9450363879fe5ae7e085c4b8a7ac3c52e591"
+      },
+      "gpu_name": "NVIDIA RTX PRO 4500 Blackwell",
+      "passed": true,
+      "source": "runs_remote/B"
+    },
+    {
+      "device": "cuda",
+      "digests": {
+        "first": "55d1f9d6ba4407d3b1eb6636cf4d72bea95ae94a6a43d8ddf5c8df5b307ef9d0",
+        "resumed": "55d1f9d6ba4407d3b1eb6636cf4d72bea95ae94a6a43d8ddf5c8df5b307ef9d0",
+        "second": "55d1f9d6ba4407d3b1eb6636cf4d72bea95ae94a6a43d8ddf5c8df5b307ef9d0"
+      },
+      "gpu_name": "NVIDIA RTX PRO 4000 Blackwell",
+      "passed": true,
+      "source": "runs_remote/C"
+    },
+    {
+      "device": "cuda",
+      "digests": {
+        "first": "cbb49779010870a35d872039bf87723643b6e3c3348c264b8141034cafb5696b",
+        "resumed": "cbb49779010870a35d872039bf87723643b6e3c3348c264b8141034cafb5696b",
+        "second": "cbb49779010870a35d872039bf87723643b6e3c3348c264b8141034cafb5696b"
+      },
+      "gpu_name": "NVIDIA GeForce RTX 3090",
+      "passed": true,
+      "source": "runs_remote/D"
+    }
+  ],
+  "note": "merged from per-machine replay checks; every device must pass",
+  "passed": true
+}

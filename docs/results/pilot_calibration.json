@@ -1,0 +1,34 @@
+{
+  "blocks": [
+    0,
+    1,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "delta_G": 0.004012225212365773,
+  "diagnostics": {
+    "exploratory_pilot_primary_estimate": 0.0006272625376377797,
+    "fraction_blocks_I_within_eps_of_C": {
+      "id_acc": 1.0,
+      "id_aff_nll": 0.875,
+      "id_nll": 0.875
+    },
+    "stage_b_pass_rate": 0.875
+  },
+  "eps": {
+    "id_acc": 0.002,
+    "id_aff_nll": 0.0008005655754025538,
+    "id_nll": 0.00034791288988264503
+  },
+  "horizon_step": 72000,
+  "n_blocks": 68,
+  "n_detection": 63,
+  "n_equivalence": 68,
+  "n_exceeds_max": false,
+  "sigma_d": 0.01114653050693064,
+  "toml": "[design]\nn_blocks = 68\n\n[analysis]\neps_id_nll = 0.000347913\neps_id_aff_nll = 0.000800566\neps_id_acc = 0.002\ndelta_G = 0.00401223\n"
+}
