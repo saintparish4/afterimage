@@ -31,7 +31,7 @@ def make_model(cfg: Config, device: torch.device, seed: int | None = None) -> Tr
 def make_optimizer(model: Transformer, cfg: Config) -> torch.optim.AdamW:
     o = cfg.optim
     return torch.optim.AdamW(param_groups(model, o.weight_decay), lr=o.lr, betas=tuple(o.betas), eps=o.eps,
-                             foreach=False, fused=False)
+                             foreach=True, fused=False)
 
 
 @dataclass
