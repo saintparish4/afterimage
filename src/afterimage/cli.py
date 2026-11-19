@@ -165,12 +165,27 @@ def cmd_run(args):
     cfg = _cfg(args)
     if cfg.meta.phase == "confirmatory" and not args.unsafe_dev:
         _guard(cfg, need_margins=True)
+    import os
+
+    from .artifacts.ledger import GpuSampler
+    from .experiment.layout import study_dir
+
     dev = _device(cfg)
     ctx = load_context(cfg, dev, log=log)
-    ran = worker_loop(cfg, lambda b: run_block(cfg, b, ctx), device=str(dev), blocks=_parse_blocks(args.blocks),
-                      budget_hours=args.budget_gpu_hours, log=log)
+    sample_path = study_dir(cfg) / "logs" / f"gpu_{os.getpid()}.csv"
+    with GpuSampler(sample_path, device_index=dev.index or 0) if dev.type == "cuda" else _Null():
+        ran = worker_loop(cfg, lambda b: run_block(cfg, b, ctx), device=str(dev), blocks=_parse_blocks(args.blocks),
+                          budget_hours=args.budget_gpu_hours, log=log)
     log(f"ran blocks: {ran}")
     return 0
+
+
+class _Null:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 def cmd_launch(args):
