@@ -228,6 +228,17 @@ def cmd_reproduce_r1(args):
     return 0 if r["passed"] else 1
 
 
+def cmd_merge(args):
+    from .experiment.layout import study_dir
+    from .experiment.merge import merge_studies
+
+    cfg = _cfg(args)
+    r = merge_studies([Path(x) for x in args.sources], study_dir(cfg))
+    log(f"merged {len(r['blocks'])} blocks, {r['ledger_rows']} ledger rows; "
+        f"determinism passed on every device: {r['determinism']['passed']}")
+    return 0 if r["determinism"]["passed"] else 1
+
+
 def cmd_evaluate_sealed(args):
     from .experiment.sealed_eval import evaluate_sealed
 
@@ -405,6 +416,9 @@ def build_parser() -> argparse.ArgumentParser:
     r1.add_argument("--into", required=True, help="empty runs directory to replay into")
     r1.add_argument("--blocks")
     r1.add_argument("--device")
+
+    mg = add("merge", cmd_merge, "merge per-machine study directories into this config's study")
+    mg.add_argument("sources", nargs="+", help="study directories (runs/<name>) from each machine")
 
     es = add("evaluate-sealed", cmd_evaluate_sealed, "predict sealed splits at saved horizons")
     es.add_argument("--device")

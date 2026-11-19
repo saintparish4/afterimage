@@ -185,3 +185,24 @@ def test_worker_loop_replaces_an_in_progress_block_that_fails_its_gate(tmp_path,
     ran = worker_loop(cfg, fake_run, device="cpu", log=lambda *_: None, poll_seconds=0.05)
     timer.join()
     assert ran == [1, 2]
+
+
+def test_merge_studies(tmp_path):
+    from afterimage.experiment.merge import merge_studies
+
+    for i, blocks in enumerate(([0, 2], [1, 3])):
+        src = tmp_path / f"m{i}"
+        for b in blocks:
+            atomic_write_json(src / f"block_{b:03d}" / "block.json", {"status": "complete"})
+        ledger.append_row(src / "ledger.csv", ledger.LedgerRow(f"j{i}", "c", blocks[0], "cuda:0", "gpu", 0, 1, 1.0, "ok"))
+        atomic_write_json(src / "determinism.json", {"passed": True, "device": "cuda:0", "env": {"gpu_name": f"G{i}"}})
+    out = merge_studies([tmp_path / "m0", tmp_path / "m1"], tmp_path / "dest")
+    assert out["blocks"] == ["block_000", "block_001", "block_002", "block_003"]
+    assert out["ledger_rows"] == 2 and out["determinism"]["passed"]
+    assert len(ledger.read_rows(tmp_path / "dest" / "ledger.csv")) == 2
+    atomic_write_json(tmp_path / "m1" / "determinism.json", {"passed": False, "device": "cuda:0"})
+    out2 = merge_studies([tmp_path / "m0", tmp_path / "m1"], tmp_path / "dest2")
+    assert not out2["determinism"]["passed"]
+    atomic_write_json(tmp_path / "m1" / "block_000" / "block.json", {"status": "complete"})
+    with pytest.raises(ValueError):
+        merge_studies([tmp_path / "m0", tmp_path / "m1"], tmp_path / "dest3")
