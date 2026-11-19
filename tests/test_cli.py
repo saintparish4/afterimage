@@ -82,8 +82,12 @@ def test_parse_blocks():
 def test_guards_refuse_non_confirmatory_and_unfrozen_configs():
     smoke = load_config(ROOT / "configs" / "smoke.toml")
     assert any("phase" in p for p in confirmatory_guards(smoke, need_margins=True))
+    import dataclasses
+
     conf = load_config(ROOT / "configs" / "confirmatory.toml")
-    probs = confirmatory_guards(conf, need_margins=True)
+    unfrozen = conf.replace(meta=dataclasses.replace(conf.meta, prereg_commit=""),
+                            analysis=dataclasses.replace(conf.analysis, delta_G=float("nan")))
+    probs = confirmatory_guards(unfrozen, need_margins=True)
     assert any("prereg_commit is empty" in p for p in probs)
     assert any("delta_G" in p for p in probs)
 
@@ -93,9 +97,15 @@ def test_calibrate_refuses_confirmatory(capsys):
     assert "never on confirmatory data" in capsys.readouterr().out
 
 
-def test_analyze_confirmatory_is_guarded():
-    with pytest.raises(SystemExit):
-        main(["analyze", "--config", str(ROOT / "configs" / "confirmatory.toml"), "--confirmatory"])
+def test_analyze_confirmatory_is_guarded(tmp_path):
+    # Refused either by the guards (SystemExit) or because no sealed splits exist here (exit 2).
+    try:
+        rc = main(["analyze", "--config", str(ROOT / "configs" / "confirmatory.toml"), "--confirmatory",
+                   "--out", str(tmp_path)])
+    except SystemExit as e:
+        rc = e.code
+    assert rc != 0
+    assert not (tmp_path / "confirmatory" / "analysis.json").exists()
 
 
 @pytest.mark.slow
