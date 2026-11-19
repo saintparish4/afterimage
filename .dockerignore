@@ -1,0 +1,10 @@
+.git
+.venv
+runs
+results
+data/generated
+artifacts
+**/__pycache__
+.pytest_cache
+.hypothesis
+directive
