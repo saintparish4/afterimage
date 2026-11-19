@@ -17,12 +17,17 @@ results are possible, and all three are publishable outcomes: the effect is
 detected, it is bounded by an equivalence test, or the study shows that it
 could not be resolved.
 
-> **Status: implemented, not yet run at scale.** The full pipeline is built
-> and tested end to end on CPU: language and oracles, dataset, model,
-> forkable training, the paired experiment, the pre-registered analysis,
-> diagnostics and replication tooling. The pilot and the confirmatory study
-> need a GPU and have **not** been run, so there are no results yet. The
-> research design is in [`docs/blueprint.md`](docs/blueprint.md).
+> **Status: complete.** The pre-registered confirmatory study (n = 16 seed
+> blocks, run on RunPod GPUs) finished with outcome **C, inconclusive**.
+> Familiar-task equivalence was established and every validity check
+> passed. The held-out difference after correction was +0.0023 nats, 95% CI
+> [−0.0003, +0.0049], and it was not distinguishable from the difference a
+> data-order placebo produces. The study was underpowered by design (power
+> 0.27 at the smallest effect of interest), so this is not evidence of
+> absence. Read [`docs/results.md`](docs/results.md) first. The design is
+> in [`docs/blueprint.md`](docs/blueprint.md), the pilot in
+> [`docs/pilot_report.md`](docs/pilot_report.md), and the frozen plan in
+> [`prereg/preregistration.md`](prereg/preregistration.md).
 
 ---
 
@@ -94,9 +99,12 @@ uv run afterimage analyze $F --confirmatory     # runs once; refuses on a dirty 
 ```
 
 `scripts/run_then_shutdown.sh` wraps `launch` for on-demand nodes, and the
-`Dockerfile` provides a digest-pinned environment. Expected cost: by current
-estimates, single-digit to low-double-digit GPU-hours on one GPU
-(blueprint §11). This is to be confirmed by measurement.
+`Dockerfile` provides a digest-pinned environment. Measured: about 5–20 ms
+per training step depending on the host CPU, and about 1 h per block with
+4–6 blocks per GPU. The whole study (pilot plus confirmatory) cost $4.69
+on RunPod. To split a study across machines without shared storage, give
+each machine a disjoint `run --blocks` list and combine the results with
+`afterimage merge`.
 
 ## Commands
 
@@ -110,6 +118,7 @@ estimates, single-digit to low-double-digit GPU-hours on one GPU
 | `calibrate` | pilot-only: equivalence margins, smallest effect of interest, sample size |
 | `diagnose` | exploratory CKA, barriers, activation patching, gradient alignment, TracIn |
 | `reproduce-r1` | rerun forks from released fork states and require identical bits |
+| `merge` | combine study directories from machines that ran disjoint blocks |
 | `status` / `audit` | block statuses and device-hours; data, leakage, determinism and Stage A checks |
 
 ## Design principles
@@ -146,7 +155,8 @@ src/afterimage/
   diagnostics/    CKA, barriers, activation patching, TracIn
   artifacts/      hashing, environment capture, device-hour ledger
 tests/            mirrors src/; `-m slow` for exhaustive and end-to-end checks
-docs/             blueprint, environment, measured throughput
+docs/             blueprint, pilot report, results (+ official outputs in docs/results/),
+                  environment, measured throughput
 ```
 
 ## Reproducibility
