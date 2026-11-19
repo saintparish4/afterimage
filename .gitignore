@@ -1,0 +1,50 @@
+# --- Private working notes (never committed) ---------------------------------
+directive/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+
+# --- Tooling caches ----------------------------------------------------------
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# --- Experiment outputs ------------------------------------------------------
+# Checkpoints, generated splits and run logs are released as checksummed
+# artifacts (see docs/blueprint.md §14), not stored in git.
+runs/
+artifacts/
+results/
+data/generated/
+*.safetensors
+*.pt
+*.pth
+*.parquet
+!tests/fixtures/**/*.parquet
+
+# --- Local environment and secrets -------------------------------------------
+.env
+.env.*
+.claude/settings.local.json
+
+# --- Editors and OS ----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
