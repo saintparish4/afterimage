@@ -54,3 +54,38 @@ pre-registered gate (≥ 99% at every ID depth, held-out accuracy in
 this run. Deciding it is M2's job on a GPU, with the escalation ladder in
 blueprint §5.3 if needed. Wall time on CPU was about 2.2 s/step at first,
 because of CPU contention, and about 0.7 s/step once the CPU was free.
+
+## RunPod RTX 4090 (pod `8fpo9efvptklkf`, EUR-IS-2, driver 595.112.07, host CUDA 13.2, 12 vCPUs)
+
+| Measurement | Result |
+|---|---|
+| `data build` (pilot) | 63 s. Pool SHA-256 identical to the local build (`e0a1c9f36a51…`), so the data is bitwise reproducible across machines |
+| `data audit` | all 23 checks pass |
+| `afterimage replay --steps 500` | **replay and resume bit-identical on the GPU**; 34.8 steps/s (for-loop AdamW), 43.9 steps/s (foreach AdamW) |
+| Step profile, deterministic, foreach | 20.6 ms per step (forward+backward 17.4 ms, optimizer 1.7 ms). CPU-dispatch bound, not compute bound |
+| 4 concurrent workers on one GPU | ≈ 20–22 ms per step each, ≈ 190 steps/s aggregate |
+| 8 concurrent workers on one GPU | ≈ 60 ms per step each (the 12 vCPUs are saturated), ≈ 133 steps/s aggregate, ≈ 3.2 GB GPU memory per process |
+| One block, 4 workers | base phase (30k steps) ≈ 11 min; a full block ≈ 1 h |
+
+## First pilot gate result (blocks 0-3, T0 = 30,000)
+
+All four base models **failed** the pre-registered learnability gate.
+The pilot was stopped there, and no arms were run. The failures:
+
+| block | id_dev acc | id_dev depth-4 acc | X-containing acc | ood_dev acc (band 0.60-0.97) | "loss spikes" |
+|---|---|---|---|---|---|
+| 000 | 0.9899 ✗ | 0.9814 ✗ | 0.9873 ✗ | 0.9708 ✗ | 135 ✗ |
+| 001 | 0.9973 | 0.9947 | 0.9961 | 0.9919 ✗ | 93 ✗ |
+| 002 | 0.9915 ✗ | 0.9837 ✗ | 0.9880 ✗ | 0.9741 ✗ | 10 ✗ |
+| 003 | 0.9977 | 0.9954 | 0.9969 | 0.9895 ✗ | 41 ✗ |
+
+Depths 1–3 are at 99.85–100% in every block. Three findings:
+
+1. **The held-out compositions are at the ceiling** (97–99%). The model
+   generalizes to unseen operator adjacencies almost perfectly, which is
+   above the band meant to leave room for an effect.
+2. **The loss-spike check is miscalibrated.** Median loss after warm-up
+   is only 0.005–0.015. "3 × median" therefore flags ordinary minibatch
+   noise: the largest second-half loss in any block is 0.10, losses are
+   finite, and the loss trend is flat.
+3. **Depth 4 is not reliably at 99% by T0** (2 of 4 blocks at 98.1–98.4%).
