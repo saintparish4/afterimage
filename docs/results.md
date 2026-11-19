@@ -117,13 +117,18 @@ sign.
 * Scope: one synthetic language, one false rule, one 0.8M-parameter model,
   one correction horizon (blueprint §15).
 
-## 8. Next step, if continued
+## 8. TBD: the fully powered run (n = 68)
 
-Run the remaining blocks to reach n = 68 under the same frozen design.
-The pilot's power analysis asks for that many to tell detection apart
-from equivalence. Add I − N as a pre-registered secondary in a new
-pre-registration. Estimated time is about 4 h of wall clock on four
-pods.
+**Status: not run. Planned for later.**
+
+| Item | Plan |
+|---|---|
+| Goal | reach the n = 68 blocks the pilot power analysis asked for (power 0.8 for both detection and equivalence at δ_G = 0.004 nats) |
+| Design | unchanged and frozen. The same config and pre-registered analysis; the 16 analysed blocks plus 52 more from block 21 onward |
+| Additions | a new pre-registration amendment, before any new data, that makes I − N a pre-registered secondary |
+| Compute | about 4 hours of wall clock on 4 RunPod GPU pods (5 blocks per pod at a time, ~1–1.3 h per round) |
+| Cost estimate | about $5–8 at the rates billed for the n = 16 run ($2.68/h for four pods) |
+| What it can decide | between "persistent difference detected" (A), "practically equivalent" (B), and inconclusive (C) at the pre-registered margin |
 
 ## 9. Cost
 

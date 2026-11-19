@@ -121,6 +121,28 @@ each machine a disjoint `run --blocks` list and combine the results with
 | `merge` | combine study directories from machines that ran disjoint blocks |
 | `status` / `audit` | block statuses and device-hours; data, leakage, determinism and Stage A checks |
 
+## Findings so far
+
+| | |
+|---|---|
+| Confirmatory outcome (n = 16) | **C, inconclusive**. Held-out NLL I − C = +0.0023 nats, 95% CI [−0.0003, +0.0049], p = 0.076 |
+| Familiar-task equivalence after correction | established on all three pre-registered metrics |
+| False rule during the window | learned: held-out NLL +2.60 nats at the end of the window, back near zero within ~5,000 correction steps |
+| Rule specificity (exploratory) | I − N = −0.0003 nats, p = 0.84: no residue beyond a data-order placebo |
+| Validity | identical fork starts, no post-fork failures, placebo null, bitwise replay on 4 GPU types, clean leakage audit |
+| Power | 0.27 at the smallest effect of interest (0.004 nats). Not evidence of absence |
+
+Full write-up: [`docs/results.md`](docs/results.md).
+
+## TBD
+
+- **Fully powered confirmatory run (n = 68).** About 4 hours on 4 RunPod
+  GPU pods, same frozen design, plus a pre-registration amendment adding
+  I − N as a secondary. Not yet run. See
+  [`docs/results.md` §8](docs/results.md#8-tbd-the-fully-powered-run-n--68).
+- Release the raw run artifacts (checkpoints and per-example predictions,
+  ~6 GB) as a separate archive. They are kept locally and are not in git.
+
 ## Design principles
 
 - **One experiment, studied in depth.** No general-purpose framework.
