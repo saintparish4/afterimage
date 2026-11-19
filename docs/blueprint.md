@@ -1,9 +1,14 @@
 # AFTERIMAGE: Research and Engineering Blueprint
 
-**Status:** design v0.1, written before any implementation. Values written as
-`⟨pilot⟩` are placeholders. The pilot (milestone M5) sets them, and they are
-frozen in `prereg/preregistration.md` before any confirmatory run. Nothing in
-this document is a result.
+**Status:** design v0.2. The software described here is implemented in this
+repository (milestones M1–M4 and the tooling for M5–M10). The pilot and
+confirmatory runs have **not** been performed. Values written as `⟨pilot⟩`
+are placeholders. The pilot (milestone M5) sets them, and they are frozen in
+`prereg/preregistration.md` before any confirmatory run. Nothing in this
+document is a result. v0.2 corrects v0.1 where implementation or
+measurement showed it was wrong: the split definitions (§4.5), the seed
+derivation (§6.7), the sample-size example (§9.2) and the throughput
+estimates (§5.4, §11.1).
 
 **Operational term.** *Behavioral afterimage* is a name for a measurable
 quantity defined in §2. It is not an established phenomenon, and the name does
@@ -552,21 +557,24 @@ that decision is made on arm-C data alone.
 
 | Split | Definition | Size | Use |
 |---|---|---|---|
-| `pool` | depth 1–4, sig ∩ ℋ = ∅, excludes every evaluation string | 4M rows `⟨pilot⟩` | training stream for all arms |
-| `id_dev` | same distribution as `pool`, disjoint from it | 20k | development and the gate |
-| `id_conf` | same, disjoint from all other splits | 20k | Stage C equivalence |
-| `id_small` | *all* trees of depth ≤ 2 (enumerated) | 1,622 | reported separately: the lookup regime |
+| `pool` | depth 1–4, sig ∩ ℋ = ∅, excludes every `id_dev` row; duplicates allowed | 4M rows | training stream for all arms |
+| `id_dev` | depth 3–4, sig ∩ ℋ = ∅, unique rows, disjoint from `pool` | 20k | development and the gate |
+| `id_conf` | as `id_dev`, sealed seed, disjoint from `pool` and `id_dev` | 20k | Stage C equivalence |
+| `id_small` | every depth-1–2 tree with sig ∩ ℋ = ∅ (enumerated) | 1,204 | reported separately: the lookup regime |
 | `ood_dev` | depth 2–4, sig ∩ ℋ ≠ ∅ | 20k | development and the gate |
-| `ood_conf` | same distribution, sealed seed | 20k | **primary endpoint** |
-| `depth5` | depth 5, sig ∩ ℋ = ∅ | 10k | exploratory productivity check |
+| `ood_conf` | as `ood_dev`, sealed seed, disjoint from `ood_dev` | 20k | **primary endpoint** |
+| `depth5` | depth 5, sig ∩ ℋ = ∅, at most 31 tokens (the longest training expression), so no untrained position embedding is read | 10k | exploratory productivity check |
 | `probe` | fixed 2,048 from `id_dev` plus 2,048 from `ood_dev` | 4,096 | trajectories and representations |
 
 **Leakage prevention.**
 
-1. Strings are canonical: the space-joined postfix tokens.
-2. Evaluation sets are generated first. The pool generator rejects any string
-   that appears in an evaluation set and any string whose signature intersects
-   ℋ.
+1. Rows are canonical: the padded token row `BOS expr EQ PAD…`.
+2. The development sets are generated first. The pool generator rejects any
+   row in `id_dev` and any expression whose signature intersects ℋ, which
+   already excludes every OOD row. The sealed `id_conf` is generated later,
+   so it instead rejects every `pool` and `id_dev` row. Candidates are
+   rejected by a 64-bit row hash; `afterimage data audit` then verifies
+   disjointness byte for byte.
 3. Trees of depth ≤ 2 are few (1,622 in total) and the pool covers them almost
    completely. ID *disjointness* is therefore only claimed for depths 3–4, and
    depth-≤2 performance is reported as a lookup regime. Held-out examples of
@@ -677,8 +685,12 @@ the main experiment does not run.
 ### 5.4 Size and hardware
 
 At 0.8M parameters with 34-token sequences, a step costs about 6 · 0.8M ·
-256 · 34 ≈ 4·10¹⁰ FLOPs. That is far below what any GPU can do, so steps are
-bound by kernel-launch latency. §11 explains how that affects throughput.
+256 · 34 ≈ 4·10¹⁰ FLOPs. v0.1 assumed this would be launch-latency bound.
+It is not: at FP32 with TF32 disabled, a step is compute-bound, and it
+measured 0.67–0.80 s on an 8-thread laptop CPU
+([`measured_throughput.md`](measured_throughput.md)). GPU throughput must be
+measured with `afterimage replay --device cuda` before any scaling decision
+(§11).
 
 ### 5.5 What the size limit costs
 
@@ -865,8 +877,11 @@ weights.
 
 ### 6.7 Seeds
 
-The block seed is `SeedSequence(master).spawn(n_blocks)[b].entropy`, with
-separate masters for pilot and confirmatory runs. Every random draw inside a
+The block seed is the 64-bit state of `SeedSequence(master, spawn_key=(b,))`
+(`data/schedule.py:block_seed`), with separate masters for pilot and
+confirmatory runs. v0.1 proposed `spawn(n)[b].entropy`, which is a bug:
+spawned children share the parent's entropy and differ only in their
+`spawn_key`, so every block would have received the same seed. Every random draw inside a
 block uses the keyed form `default_rng([block_seed, KEY_ID[k], counter])`.
 Blocks are independent replicates. Checkpoints within a block are repeated
 measurements, never replicates.
@@ -1008,14 +1023,17 @@ form (§4.3, point 2).
 
 * The `ood_conf` and `id_conf` seeds are **derived from the git commit hash of
   the frozen pre-registration**:
-  `seed = int(sha256(b"ood_conf:" + commit_hash).hexdigest()[:16], 16)`.
-  They cannot exist before the analysis plan is frozen, and anyone can check
-  the derivation.
+  `seed = int(sha256(b"afterimage-sealed:" + commit_hash).hexdigest()[:16], 16)`,
+  and each split draws from `default_rng([seed, split_key])`. They cannot
+  exist before the analysis plan is frozen, and anyone can check the
+  derivation (`data/splits.py:sealed_seed`).
 * All development and pilot work uses `ood_dev` and `id_dev` only.
 * `afterimage analyze --confirmatory` refuses to run if the working tree is
-  dirty, if the config hash differs from the one in the pre-registration, or
-  if a results file for `ood_conf` already exists. Confirmatory analysis runs
-  once.
+  dirty, if `meta.prereg_commit` is not a commit containing the
+  pre-registration, if the config's science hash differs from the config at
+  that commit, if any margin is uncalibrated, if the sealed sets were derived
+  from another commit, or if `results/confirmatory/analysis.json` already
+  exists. Confirmatory analysis runs once.
 * Any example or subset found while looking at data, for example "errors
   cluster on `(I,1,X)` at depth 3," is labeled exploratory. It becomes
   confirmatory only if it is pre-registered for a *new* run with a *new*
@@ -1046,12 +1064,15 @@ For TOST power 1−β when the true τ = 0:
 
   n_eq = ⌈((z_{1−α} + z_{1−β/2}) · σ_d / δ_G)²⌉
 
-Take n = max(n_det, n_eq, 16), computed with
-`statsmodels.stats.power.TTestPower().solve_power(...)` and its t-distribution
-correction.
+These z formulas are approximations. The implementation
+(`analysis/stats.py`) uses the exact t-based versions: n_det from
+`statsmodels.stats.power.TTestPower().solve_power(...)`, and n_eq as the
+smallest n whose TOST power under the noncentral t reaches 1−β (checked
+against simulation in the tests). Take n = max(n_det, n_eq, 16).
 
 **Worked example (illustrative numbers):** with σ_d = 0.02 nats, δ_G = 0.01
-nats, α = 0.05 and power 0.8, n_det ≈ 32 and n_eq ≈ 35, so n = 35. If the
+nats, α = 0.05 and power 0.8, the t-based sizes are n_det = 34 and n_eq = 36
+(the z approximations give 32 and 35), so n = 36. If the
 pilot implies n > 128, the margins or design are revisited *before*
 confirmatory runs. The study is not run underpowered.
 
@@ -1128,20 +1149,26 @@ can promote or demote the outcome category.
 
 ### 10.1 What is recorded, and how often
 
-| Quantity | Cadence | Storage |
+| Quantity | Cadence (`[eval]` config) | Storage |
 |---|---|---|
-| Training loss, per-batch affected rate, LR | every step | `steps.parquet` |
-| Per-tensor gradient norm, update norm ‖Δθ‖/‖θ‖ | every 10 steps | `dyn.parquet` |
-| Adam ν statistics per tensor (mean, p50, p99, max) | every 100 steps | `dyn.parquet` |
-| Gradient cosine between arms on the *same* correction batch | every 100 steps (recompute ∇ for arm C at the stored θ_I and θ_C) | `xarm.parquet` |
-| Full answer distributions on `probe` (4,096 × 2 log-probs) | at every checkpoint | `probe_logits/<step>.parquet` |
-| Residual-stream activations at selected positions (the X token, EQ) per layer on 512 probes | at every checkpoint | `acts/<step>.safetensors` |
-| ID/OOD metrics, with all subsets | at every checkpoint | `eval.parquet` |
-| Wall time, GPU utilization, memory | every 10 s | `gpu.parquet` (NVML) |
+| Training loss, LR, per-batch affected and wrong-label counts | every `log_every` steps, and every window step | `logs/steps_*.parquet` |
+| Per-tensor gradient norm, update norm, parameter norm | every `dyn_every` steps | `logs/dyn_*.parquet` |
+| Adam ν statistics per tensor (mean, p50, p99, max) | every `nu_every` steps | `logs/dyn_*.parquet` |
+| Answer log-probs on `probe` | every checkpoint | `preds/step_*.safetensors` |
+| Answer log-probs on every development split | T0, T0+K and every horizon | `preds/step_*.safetensors` |
+| ID/OOD metrics for every subset | every checkpoint | `eval/step_*.parquet` |
+| Savings-probe curve | every `relearn_eval_every` re-exposure steps | `relearn.parquet` |
+| GPU utilization, memory, power | every 10 s (CUDA runs only) | `logs/gpu_*.csv` (NVML) |
 
-Checkpoints: 20 log-spaced points over [0, T0], then T0, T0+K/4, T0+K/2, T0+K,
-then T0+K+h for h ∈ 𝓗. Full training state is kept at T0, T0+K and T0+K+H.
-Weights only are kept elsewhere.
+Gradient cosine between arms, residual-stream activations and CKA are
+computed afterwards from the saved weights (`afterimage diagnose`) rather
+than during training, which keeps the training loop simple and storage
+small.
+
+Checkpoints: `base_checkpoints` log-spaced points over [1, T0], then T0,
+T0+K/4, T0+K/2, T0+K, then T0+K+h for h ∈ 𝓗. Full training state is kept at
+T0 (`fork/`), T0+K (`post_window/`) and T0+K+H (`final/`), plus a rolling
+`resume/` state. Weights only are kept at each horizon (`ckpt_*/`).
 
 ### 10.2 Comparing trajectories without overreading parameters
 
@@ -1233,27 +1260,33 @@ the report says exactly that: *effect established, mechanism unknown*.
 
 ## 11. GPU infrastructure and cost
 
-### 11.1 Throughput estimates, to be replaced at M2
+### 11.1 Throughput: measured so far, and what remains an estimate
 
-These are order-of-magnitude estimates only. The steps-per-second figure must
-be measured in M2 and recorded in `docs/measured_throughput.md` before the
-scaling plan below is used.
+Measurements are in [`measured_throughput.md`](measured_throughput.md). No
+GPU has been measured yet, so every GPU figure below is still an estimate
+and must be replaced by `afterimage replay --device cuda` output at M2.
 
-| Item | Estimate |
+| Item | Value |
 |---|---|
-| Step time (0.8M parameters, B = 256, FP32, eager, deterministic) | ~3–6 ms on a current datacenter GPU; ~30–80 ms on CPU |
-| Base phase T0 = 30k steps `⟨pilot⟩` | ~2–3 min GPU |
-| One arm, K + H = 22k steps, plus evaluation | ~1.5–2.5 min |
-| One block (base + 4 arms + savings probes) | ~10 min |
-| Confirmatory run, 35 blocks | **~6 GPU-hours** |
-| Pilot, sensitivity analyses and hybrid forks | ~10 GPU-hours |
-| Storage | ~10 MB per full state; ~150 MB per block with logs; ~6 GB in total |
+| FLOPs per training step (0.8M parameters, B = 256, ≤ 34 tokens) | ≈ 4·10¹⁰ (compute-bound at FP32) |
+| CPU step time (8-thread laptop CPU, deterministic) | **measured** 0.67–0.80 s, about 1.2 steps/s |
+| GPU step time (datacenter GPU, FP32, TF32 off) | *estimate* 4–10 ms |
+| Steps per block: base T0 + 6 arms × (K + H) + 6 × R | 30k + 132k + 1.8k ≈ 164k `⟨pilot⟩` |
+| One block on GPU | *estimate* 11–27 min, plus evaluation |
+| Confirmatory run, 36 blocks | *estimate* **7–17 GPU-hours** |
+| Pilot (8 blocks), sensitivity and diagnostics | *estimate* 3–6 GPU-hours |
+| Pilot-scale dataset build (4M-row pool, 8 workers) | **measured** 116 s, 27 MB on disk |
+| Exact leakage audit of that dataset | **measured** 43 s |
+| Storage | ≈ 10 MB per full state, 3 MB per weights-only checkpoint |
+
+The pilot and confirmatory runs are therefore GPU jobs. On this CPU, a
+single block would take roughly 40 hours.
 
 ### 11.2 What is and is not needed
 
-The model is launch-latency bound and uses a small fraction of a GPU. The
-efficient layout is several block processes on one GPU. Four to eight
-processes per device is typical, using MPS if it is available. Determinism is
+A step is compute-bound at FP32, so packing many processes onto one GPU
+helps less than v0.1 assumed. Two to four processes per device is a
+reasonable start, and the right number should be measured. Determinism is
 per process, so it is unaffected.
 
 * **Needed:** 1 GPU, and up to 8 on one node to shorten wall-clock time.
@@ -1273,8 +1306,9 @@ idempotent and resumable from files. A ~100-line launcher handles them:
 1. A job list (block IDs).
 2. One `fcntl` lock file per job on shared storage.
 3. N worker processes per GPU pinned with `CUDA_VISIBLE_DEVICES`.
-4. Each worker claims a free lock, runs `afterimage run-block`, and releases
-   the lock.
+4. Each worker claims a free lock, runs the block, appends a ledger row and
+   releases the lock (`experiment/launcher.py`; `afterimage launch` spawns
+   the workers, `afterimage run` runs one in-process).
 
 Ray adds a runtime, a scheduler and failure modes that do nothing for this
 workload. Reconsider it only if the job count exceeds ~10⁴ or work must
@@ -1284,11 +1318,13 @@ span several nodes, and neither is expected.
 
 * `pyproject.toml` with `uv.lock`, and `uv sync --frozen` in CI and in the
   container.
-* The container is built from an official PyTorch CUDA runtime image, **pinned
-  by digest** (`image@sha256:…`). Tags are mutable, so tags alone are not
-  enough. The exact digest, PyTorch version and CUDA version are fixed at M2
-  and recorded in `docs/environment.md`.
-* The same image runs CPU tests in CI.
+* The `Dockerfile` starts from `python:3.12-slim-bookworm` **pinned by
+  digest**, because tags are mutable. torch comes from the locked `cu130` or
+  `cpu` extra. The CUDA wheels bundle the CUDA runtime, so the host needs
+  only a driver. The image holds dependencies only, and the checkout is
+  mounted at run time so git metadata and code are exactly the repository's.
+  See [`environment.md`](environment.md).
+* The same image, built with `TORCH_EXTRA=cpu`, runs the CPU checks.
 
 ### 11.5 Experiment metadata (`RunMeta`, written with every checkpoint)
 
@@ -1305,7 +1341,7 @@ span several nodes, and neither is expected.
 ### 11.6 Recovery
 
 Every stage writes a completion marker only after its checkpoint hashes
-verify. `run-block` is idempotent: it finds the latest verified checkpoint
+verify. Running a block is idempotent: it finds the latest verified checkpoint
 for each arm and resumes from there. The stateless data schedule (§6.3) and
 the saved optimizer and scheduler state make resumption exact, which the
 resume test in §6.5 checks.
@@ -1313,22 +1349,24 @@ resume test in §6.5 checks.
 ### 11.7 Monitoring and accounting
 
 * An NVML sampler thread records GPU utilization, memory and power every 10
-  seconds to `gpu.parquet`.
-* Each job appends one row to `ledger.parquet`: job, block, arm, GPU type,
-  start time, end time, GPU-seconds, exit status.
-* `afterimage ledger` totals GPU-hours by phase.
+  seconds to `logs/gpu_*.csv` during CUDA runs.
+* Each block job appends one row to `ledger.csv` (append-only, safe for
+  concurrent workers): job, phase, block, device, device name, start time,
+  end time, device-seconds, exit status.
+* `afterimage status` totals device-hours by phase.
 
 ### 11.8 Shutting down and controlling cost on an on-demand provider
 
-* The provisioning wrapper provisions **one node by default**. `--max-gpus` is
-  required to go above 1.
-* The launcher computes the projected cost as ledger total + remaining jobs ×
-  measured cost per job. It refuses to start if the projection exceeds
-  `--budget-gpu-hours`. It also stops claiming jobs once the budget is spent.
-* When the job queue is empty, the node calls the provider's terminate API.
-  The call is provider-specific and lives in one script. As a backstop,
-  `shutdown -h +15` is scheduled at boot and renewed only while jobs are
-  running.
+* Provisioning is provider-specific and stays outside this repository. The
+  default is **one node**. Use more only when the measured throughput
+  justifies it (§11.2).
+* The launcher checks spent device-hours plus the measured cost of one more
+  block against `--budget-gpu-hours` before claiming each block, and stops
+  claiming once the budget would be exceeded.
+* `scripts/run_then_shutdown.sh` runs the launcher and then executes
+  `$AFTERIMAGE_SHUTDOWN_CMD` (the provider's terminate call, or
+  `sudo shutdown -h now`), whether or not the run succeeded. It never shuts
+  anything down unless that variable is set.
 * Checkpoints live on shared storage, so terminating a node loses no work.
 
 ### 11.9 Three kinds of reproducibility
@@ -1350,132 +1388,65 @@ devices, and device type is recorded as a covariate.
 
 ```
 afterimage/
-├── pyproject.toml / uv.lock
-├── configs/
-│   ├── smoke.toml            # CPU, 2 blocks, tiny T0/K/H; runs in CI
-│   ├── pilot.toml
-│   └── confirmatory.toml     # frozen with the preregistration
-├── prereg/preregistration.md # analysis plan; its commit hash seeds the sealed sets
+├── pyproject.toml / uv.lock / .python-version     # locked env; torch via extra cpu | cu130
+├── Dockerfile                                      # digest-pinned base image
+├── configs/{smoke,pilot,confirmatory}.toml
+├── prereg/preregistration.md                       # its commit hash seeds the sealed sets
+├── scripts/reproduce.sh                            # tiers: smoke | r1 | r2
+├── scripts/run_then_shutdown.sh                    # opt-in cost control wrapper
 ├── src/afterimage/
-│   ├── lang/                 # grammar.py, interp.py, interp_stack.py, generate.py,
-│   │                         # intervention.py, signature.py, enumerate.py
-│   ├── data/                 # build.py (splits → Parquet + manifest), schedule.py (§6.3)
-│   ├── model/                # transformer.py
-│   ├── train/                # state.py (TrainState I/O, fork), loop.py, determinism.py, gate.py
-│   ├── experiment/           # design.py (arms, windows, horizons), run_block.py, launcher.py
-│   ├── eval/                 # metrics.py, probes.py, stages.py (A/B/C checks)
-│   ├── analysis/             # endpoints.py, stats.py, power.py, report.py
-│   ├── diagnostics/          # cka.py, interpolation.py, patching.py, tracin.py, hybrids.py
-│   ├── artifacts/            # hashing.py, manifest.py, env.py, ledger.py
-│   └── cli.py                # `afterimage …` entry point (argparse)
-├── scripts/reproduce.sh
-└── tests/                    # mirrors src/; `slow` and `gpu` markers
+│   ├── config.py             # typed TOML config, science_hash, data_hash, validation
+│   ├── cli.py                # `afterimage <command>` and the confirmatory guards
+│   ├── lang/                 # grammar.py (tokens, trees, signatures), interp.py (recursive),
+│   │                         # interp_stack.py (scalar stack), interp_vec.py (vectorized),
+│   │                         # generate.py (exact-depth sampler), enumerate.py
+│   ├── data/                 # splits.py (build, Parquet, manifest, audit, sealed sets),
+│   │                         # schedule.py (stateless batches, seed derivation)
+│   ├── model/transformer.py  # pre-LN decoder, explicit attention, capture/patch hooks
+│   ├── train/                # plan.py (arms, batch plans, LR), state.py (checkpoints, fork),
+│   │                         # trainer.py (deterministic step), determinism.py, gate.py
+│   ├── eval/                 # metrics.py (predictions, NLL/Brier/JS, subsets), stages.py (A, B)
+│   ├── experiment/           # run_block.py, launcher.py, replay.py (M3 check, tier R1),
+│   │                         # sealed_eval.py, layout.py (on-disk layout)
+│   ├── analysis/             # endpoints.py, stats.py, plan.py (pre-registered analysis,
+│   │                         # classify), calibrate.py, report.py
+│   ├── diagnostics/          # cka.py, probes.py (activations, barriers, patching),
+│   │                         # tracin.py, diagnose.py
+│   └── artifacts/            # hashing.py, env.py, ledger.py
+└── tests/                    # mirrors src/; `-m slow` runs exhaustive and end-to-end checks
 ```
 
 ### 12.1 Dependencies and why each is there
 
 | Dependency | Why | Alternative rejected |
 |---|---|---|
-| Python ≥ 3.11 | `tomllib` is in the standard library | — |
-| PyTorch | Model, autograd, AdamW, the determinism switches | JAX: excellent, but a mixed ecosystem gains nothing here |
-| NumPy | Generator, keyed RNG, enumeration | — |
-| safetensors | Checkpoint loading without pickle; easy to audit | `torch.save`: pickle is unsafe for auditors and less portable |
-| pyarrow (Parquet) | Typed, columnar, compressed tables for results and the pool; readable from any language | CSV loses types and is huge; a database is unnecessary |
-| SciPy | `ttest_1samp`, `wilcoxon`, `bootstrap` (BCa) | — |
+| Python 3.12 (≥ 3.11) | `tomllib` is in the standard library | — |
+| PyTorch | Model, autograd, AdamW, `torch.func`, the determinism switches | JAX: excellent, but a mixed ecosystem gains nothing here |
+| NumPy | Generator, keyed RNG, enumeration, vectorized oracle | — |
+| safetensors | Checkpoint and prediction files that load without pickle | `torch.save`: pickle is unsafe for auditors and less portable |
+| pyarrow (Parquet) | Typed, columnar, compressed splits, metrics and logs, readable from any language | CSV loses types and is huge; a database is unnecessary |
+| SciPy | `ttest_1samp`, `wilcoxon`, `bootstrap` (BCa), noncentral t | — |
 | statsmodels | `ttost_paired`, `multipletests`, `TTestPower` | Hand-rolled versions invite bugs |
 | pytest + Hypothesis | Exhaustive and property-based oracle tests | — |
-| pynvml | GPU sampling for accounting | Parsing `nvidia-smi` output is brittle |
-| *Not used* | Ray, Hydra, W&B, MLflow, any database, web dashboards | They add complexity without answering the question. Logs are files, and plots are scripts. |
+| nvidia-ml-py (`cu130` extra only) | GPU sampling for accounting | Parsing `nvidia-smi` output is brittle |
+| *Not used* | Ray, Hydra, pandas, W&B, MLflow, any database, web dashboards | They add complexity without answering the question. Logs are files, and plots are scripts. |
 
 ### 12.2 Core interfaces
 
-```python
-# lang/grammar.py
-class Op(IntEnum): N = 5; A = 6; O = 7; I = 8; X = 9         # == token ids
-@dataclass(frozen=True, slots=True)
-class Tree:
-    op: Op | None             # None for constants
-    value: int | None         # 0/1 for constants
-    kids: tuple["Tree", ...] = ()
-def to_postfix(t: Tree) -> list[int]: ...
-def from_postfix(toks: Sequence[int]) -> Tree: ...
+The interfaces live in the code. These are the entry points to read first:
 
-# lang/interp.py
-class Semantics(Enum): TRUE = 0; FALSE_XNOR = 1
-def evaluate(t: Tree, sem: Semantics = Semantics.TRUE) -> int: ...
-def affected(t: Tree) -> bool: return evaluate(t, TRUE) != evaluate(t, FALSE_XNOR)
+* `lang/interp.py:evaluate` and `lang/interp_vec.py:evaluate_batch`, the oracles.
+* `data/splits.py:Split`, the column arrays shared by every split.
+* `train/plan.py:plan_batch`, the **only** place where arms differ.
+* `train/state.py:save_state` / `load_state` / `fork`, and `TrainState.digest`.
+* `experiment/run_block.py:BlockRunner.run`, a whole paired block.
+* `analysis/plan.py:run_analysis` and `classify`, the pre-registered decision.
 
-# lang/signature.py
-Triple = tuple[Op, int, Op]
-def signature(t: Tree) -> frozenset[Triple]: ...
+### 12.3 Configuration
 
-# data/build.py
-@dataclass(frozen=True)
-class SplitSpec: name: str; depths: tuple[int, ...]; heldout: Literal["exclude", "require"]; n: int; seed_key: str
-def build_splits(cfg: DataConfig, out: Path) -> Manifest: ...   # writes <split>.parquet + manifest.json
-
-# Parquet columns (every split)
-#   tokens: fixed_size_list<uint8>[40] (PAD-filled); eq_pos: uint8; depth: uint8
-#   y_true: uint8; y_false: uint8; has_x: bool; sig_mask: uint64 (bit per triple)
-#   heldout_x: bool; heldout_nonx: bool; canon_sha1: fixed_size_binary[20]
-
-# experiment/design.py
-@dataclass(frozen=True)
-class ArmSpec:
-    name: Literal["C", "I", "N", "S", "HYB_wI_oC", "HYB_wC_oI"]
-    kind: Literal["C", "I", "N", "S"]
-    window: range                      # [T0, T0+K)
-@dataclass(frozen=True)
-class Design: T0: int; K: int; H: int; horizons: tuple[int, ...]; R: int; arms: tuple[ArmSpec, ...]
-
-# analysis/endpoints.py
-@dataclass(frozen=True)
-class Endpoint: name: str; split: str; subset: str | None; metric: Literal["nll", "brier", "acc"]
-def block_values(results: pa.Table, ep: Endpoint, arm: str, h: int) -> np.ndarray: ...   # one per block
-
-# analysis/stats.py
-@dataclass
-class PairedResult: estimate: float; ci95: tuple[float, float]; ci_bca: tuple[float, float]
-                    p: float; p_wilcoxon: float; p_tost: float | None; dz: float; n: int
-def paired(y_a: np.ndarray, y_b: np.ndarray, margin: float | None, seed: int) -> PairedResult: ...
-def classify(primary: PairedResult, id_equiv: list[PairedResult], validity: Validity) -> Category: ...
-```
-
-### 12.3 Configuration example (`configs/confirmatory.toml`)
-
-```toml
-[meta]
-prereg_commit = "<filled by `afterimage prereg freeze`>"
-master_seed   = 20261118
-
-[data]
-pool_size = 4_000_000
-train_depths = [1, 2, 3, 4]
-heldout_x    = [["I",1,"X"], ["A",2,"X"], ["X",1,"O"]]
-heldout_nonx = [["I",2,"A"], ["O",1,"I"], ["A",1,"N"]]
-
-[model]
-layers = 4; d_model = 128; heads = 4; d_ff = 512; ctx = 40; tie_embeddings = true
-
-[optim]
-lr = 5e-4; warmup = 1000; betas = [0.9, 0.98]; eps = 1e-8; weight_decay = 0.01
-batch = 256; final_decay_frac = 0.2; final_lr_frac = 0.1; grad_clip = "none"
-
-[design]
-n_blocks = 35          # from power analysis
-T0 = 30_000            # ⟨pilot⟩
-K  = 2_000             # ⟨pilot⟩
-H  = 20_000            # ⟨pilot⟩
-horizons = [0, 1250, 2500, 5000, 10000, 20000]
-R = 300
-arms = ["C", "I", "N", "S"]
-
-[analysis]
-alpha = 0.05
-epsilon = { id_nll = "<pilot>", id_aff_nll = "<pilot>", id_acc = 0.002 }
-delta_G = "<pilot>"
-placebo_invalid_p = 0.01
-```
+`configs/confirmatory.toml` is the authoritative example. `config.py`
+documents every field and rejects unknown keys. Everything except
+`[runtime]`, `[paths]` and `meta.prereg_commit` is part of `science_hash`.
 
 ---
 
@@ -1489,7 +1460,7 @@ dependency.
 ### M1: Validate the grammar and the oracle
 
 * **Objective:** a ground truth that can be trusted.
-* **Build:** `lang/*`, `data/build.py`, `data/schedule.py`.
+* **Build:** `lang/*`, `data/splits.py`, `data/schedule.py`.
 * **I/O:** a config goes in. Parquet splits and `manifest.json` (hashes,
   counts, affected rates, label marginals under both semantics) come out.
 * **Tests:** everything in §4.6, plus a test that rebuilding gives identical
@@ -1507,7 +1478,7 @@ dependency.
 ### M2: A Transformer baseline that learns the task
 
 * **Objective:** clear the learnability gate with the smallest model.
-* **Build:** `model/`, `train/loop.py`, `train/gate.py`, the determinism
+* **Build:** `model/`, `train/trainer.py`, `train/gate.py`, the determinism
   setup, metrics on `id_dev` and `ood_dev`, a throughput benchmark.
 * **I/O:** base checkpoints and gate reports for 3 seeds.
 * **Tests:**
@@ -1567,9 +1538,11 @@ dependency.
 ### M5: Pilot and pre-registration
 
 * **Objective:** fix every free parameter without touching confirmatory data.
-* **Build:** `analysis/power.py`, a margin-calibration script, `afterimage
-  prereg freeze` (writes the pre-registration, commits it, derives the sealed
-  seeds), and the persistence-curve report.
+* **Build:** `analysis/calibrate.py` (`afterimage calibrate`: margins and
+  n), the pre-registration template, and the persistence-curve report. The
+  freeze is two manual commits (fill and commit the pre-registration, then
+  record its hash in `meta.prereg_commit`). `afterimage data seal` then
+  derives the sealed seeds, and the confirmatory guards check the chain.
 * **I/O:** 8 pilot blocks on dev splits go in. The pre-registration and
   `confirmatory.toml` come out.
 * **Tests:**
@@ -1682,26 +1655,35 @@ dependency.
 * For every block: the fork state at T0, the states at T0+K and T0+K+H for
   every arm, weights at every checkpoint, and the optimizer and RNG state
   inside the full states.
-* `steps/dyn/xarm/eval/gpu.parquet`, the probe logits, `ledger.parquet` and
-  `RunMeta` for every run.
+* `logs/`, `eval/`, `preds/` and `preds_sealed/` for every arm, `ledger.csv`,
+  `determinism.json`, and the `block.json` metadata (environment, flags,
+  throughput) for every block.
 * The raw per-block, per-example evaluation results.
 * The analysis scripts and the frozen analysis output.
-* `docs/environment.md` (hardware and software) and `docs/limitations.md`.
+* `docs/environment.md` (hardware and software), and the limitations in §15.
 
-### 14.2 Executable procedure (planned CLI)
+### 14.2 Executable procedure
 
 ```bash
-git clone <repo> && cd afterimage && git checkout v1.0
-uv sync --frozen                         # or: docker run <image>@sha256:<digest>
-afterimage data build  --config configs/confirmatory.toml --verify   # hashes must match manifest
-afterimage test        --all             # oracle, intervention, determinism suites
-# Tier R1 — bitwise, from released fork checkpoints (same GPU type)
-afterimage replay      --artifacts <path> --blocks 0-34 --check-bitwise
-# Tier R2/R3 — full re-run with fresh hardware (optionally fresh master seed)
-afterimage run         --config configs/confirmatory.toml --blocks all
-afterimage analyze     --config configs/confirmatory.toml --confirmatory --out results/
-afterimage audit       --results results/  # placebo, leakage, hashes, determinism, ledger
+git clone <repo> && cd afterimage && git checkout <release tag>
+uv sync --frozen --extra cu130           # or the digest-pinned Dockerfile
+uv run pytest && uv run pytest -m slow   # oracle, intervention, determinism, end-to-end
+C=configs/confirmatory.toml
+afterimage data build  --config $C       # deterministic; then:
+afterimage data verify --config $C       # hashes must match the released manifest
+afterimage data audit  --config $C       # exact leakage audit
+afterimage replay      --config $C       # bitwise replay and resume on this GPU
+# Tier R1: bitwise, from the released fork states (same GPU model and image)
+afterimage reproduce-r1 --config $C --released <artifacts>/runs/confirmatory --into runs_r1
+# Tier R2/R3: full rerun (R3 with a fresh master_seed in a copy of the config)
+afterimage data seal   --config $C
+afterimage launch      --config $C --devices cuda:0 --workers-per-device 2
+afterimage evaluate-sealed --config $C
+afterimage analyze     --config $C --confirmatory --out results_rerun
+afterimage audit       --config $C
 ```
+
+`scripts/reproduce.sh smoke|r1|r2` wraps these steps.
 
 ### 14.3 What counts as replication
 
