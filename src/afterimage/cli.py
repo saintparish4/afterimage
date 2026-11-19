@@ -193,6 +193,26 @@ def cmd_replay(args):
     return 0 if r["passed"] else 1
 
 
+def cmd_reproduce_r1(args):
+    from .experiment.layout import study_dir
+    from .experiment.replay import replay_from_released
+    from .experiment.run_block import load_context
+
+    cfg = _cfg(args)
+    cfg = cfg.replace(paths=dataclasses.replace(cfg.paths, runs_dir=args.into))
+    if study_dir(cfg).exists() and any(study_dir(cfg).iterdir()):
+        log(f"refused: {study_dir(cfg)} is not empty")
+        return 2
+    dev = _device(cfg)
+    blocks = _parse_blocks(args.blocks) or sorted(
+        int(p.name.split("_")[1]) for p in Path(args.released).glob("block_[0-9][0-9][0-9]"))
+    r = replay_from_released(load_context(cfg, dev, log=log), Path(args.released), blocks)
+    for b, v in r["blocks"].items():
+        log(f"block_{int(b):03d}: {'identical' if v['identical'] else 'DIFFERENT'} ({len(v['arms'])} arms)")
+    log("R1 replication " + ("succeeded" if r["passed"] else "FAILED"))
+    return 0 if r["passed"] else 1
+
+
 def cmd_evaluate_sealed(args):
     from .experiment.sealed_eval import evaluate_sealed
 
@@ -364,6 +384,12 @@ def build_parser() -> argparse.ArgumentParser:
     rp = add("replay", cmd_replay, "check bitwise replay and resume on this device")
     rp.add_argument("--steps", type=int, default=500)
     rp.add_argument("--device")
+
+    r1 = add("reproduce-r1", cmd_reproduce_r1, "tier R1: rerun forks from released fork states, compare bits")
+    r1.add_argument("--released", required=True, help="released study directory (runs/<name>)")
+    r1.add_argument("--into", required=True, help="empty runs directory to replay into")
+    r1.add_argument("--blocks")
+    r1.add_argument("--device")
 
     es = add("evaluate-sealed", cmd_evaluate_sealed, "predict sealed splits at saved horizons")
     es.add_argument("--device")

@@ -125,3 +125,16 @@ def test_pipeline_end_to_end(tmp_path):
     sealed = run_analysis(Cube.load(cfg, "sealed"), determinism=None, audit=None)
     assert sealed["primary"]["n"] == 2
     assert main(["audit", *c]) == 0
+
+
+@pytest.mark.slow
+def test_reproduce_r1_matches_bits(tmp_path):
+    cfgp = tmp_path / "tiny.toml"
+    cfgp.write_text(TINY.format(tmp=tmp_path).replace("n_blocks = 2", "n_blocks = 1"))
+    c = ["--config", str(cfgp)]
+    assert main(["data", "build", *c]) == 0
+    assert main(["run", *c]) == 0
+    released = tmp_path / "runs" / "tiny"
+    assert main(["reproduce-r1", *c, "--released", str(released), "--into", str(tmp_path / "replay")]) == 0
+    out = json.loads((tmp_path / "replay" / "tiny" / "replication_r1.json").read_text())
+    assert out["passed"] and len(out["blocks"]["0"]["arms"]) == 6

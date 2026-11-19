@@ -28,6 +28,48 @@ from .layout import study_dir
 from .run_block import Context
 
 
+def replay_from_released(ctx: Context, released_study: Path, blocks: list[int]) -> dict:
+    """Replication tier R1: re-run every arm from the *released* fork states and
+    compare final-state digests with the released ones, bit for bit.
+
+    ``ctx.cfg`` must point ``runs_dir`` somewhere fresh: the released fork and
+    gate are copied in, so the base phase is skipped and only the forks rerun.
+    """
+    import shutil
+
+    from ..train.plan import arms_for
+    from ..train.state import recorded_digest, verify
+    from .layout import arm_dir, block_dir
+    from .run_block import BlockRunner
+
+    cfg = ctx.cfg
+    out: dict = {"blocks": {}, "passed": True}
+    for b in blocks:
+        src = released_study / f"block_{b:03d}"
+        if not verify(src / "fork"):
+            raise FileNotFoundError(f"released fork state missing or corrupt: {src / 'fork'}")
+        dst = block_dir(cfg, b)
+        if dst.exists():
+            raise FileExistsError(f"{dst} exists; R1 replays into an empty study directory")
+        dst.mkdir(parents=True)
+        shutil.copytree(src / "fork", dst / "fork")
+        shutil.copy2(src / "gate.json", dst / "gate.json")
+        BlockRunner(ctx, b).run()
+        arms = {}
+        for arm in arms_for(cfg):
+            rel = src / "arms" / arm.name / "final"
+            if verify(rel):
+                mine = recorded_digest(arm_dir(cfg, b, arm.name) / "final")
+                arms[arm.name] = {"released": recorded_digest(rel), "replayed": mine,
+                                  "identical": mine == recorded_digest(rel)}
+        ok = bool(arms) and all(a["identical"] for a in arms.values())
+        out["blocks"][str(b)] = {"arms": arms, "identical": ok}
+        out["passed"] &= ok
+    out["env"] = capture_env(str(ctx.device))
+    atomic_write_json(study_dir(cfg) / "replication_r1.json", out)
+    return out
+
+
 def check_determinism(ctx: Context, steps: int = 500) -> dict:
     cfg = ctx.cfg
     seed = block_seed(cfg.meta.master_seed, 0)
