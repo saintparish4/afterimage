@@ -44,6 +44,7 @@ class DataConfig:
     depth_weights: tuple[float, ...] | None = None
     id_eval_depths: tuple[int, ...] = (3, 4)
     ood_depths: tuple[int, ...] = (2, 3, 4)
+    ood_min_heldout: int = 1  # distinct held-out triples each OOD example must contain
     depth5: int = 5
     heldout_x: tuple[tuple[str, int, str], ...] = ()
     heldout_nonx: tuple[tuple[str, int, str], ...] = ()
@@ -263,6 +264,8 @@ def validate(cfg: Config) -> None:
         raise ValueError("no heldout_nonx triple may involve X")
     if d.ctx < d.max_row_len:
         raise ValueError(f"data.ctx={d.ctx} too small; need >= {d.max_row_len}")
+    if not 1 <= d.ood_min_heldout <= len(hx | hn):
+        raise ValueError("data.ood_min_heldout must be between 1 and the number of held-out triples")
     if d.depth5 <= max(d.train_depths):
         raise ValueError("data.depth5 must exceed every training depth")
     if cfg.model.ctx != d.ctx:

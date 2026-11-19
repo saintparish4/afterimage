@@ -161,6 +161,7 @@ def sample_split(
     n: int, *, name: str, seed_keys: list[int], depths: tuple[int, ...], weights: tuple[float, ...] | None,
     heldout: HeldoutMode, cfg: DataConfig, exclude_hashes: np.ndarray | None = None,
     unique: bool = True, max_len: int | None = None, batch: int = 2048, source: int = 0,
+    min_heldout: int = 1,
 ) -> Split:
     """Rejection-sample ``n`` examples deterministically from ``seed_keys``."""
     hx_mask, hn_mask = _masks(cfg)
@@ -176,7 +177,7 @@ def sample_split(
         while len(cand) < batch:
             t = sample_tree(sample_depth(depths, weights, draws), draws)
             m = triples_mask(signature(t))
-            if (heldout == "exclude" and m & h_all) or (heldout == "require" and not m & h_all):
+            if (heldout == "exclude" and m & h_all) or (heldout == "require" and (m & h_all).bit_count() < min_heldout):
                 continue
             if len(to_postfix(t)) > max_len:
                 continue
@@ -297,7 +298,8 @@ def build_dev(cfg: Config, out: Path, log=print) -> dict:
                           depths=d.id_eval_depths, weights=None, heldout="exclude", cfg=d)
     log("ood_dev")
     ood_dev = sample_split(d.n_ood_dev, name="ood_dev", seed_keys=[seed, SPLIT_KEY["ood_dev"]],
-                           depths=d.ood_depths, weights=None, heldout="require", cfg=d, source=1)
+                           depths=d.ood_depths, weights=None, heldout="require", cfg=d, source=1,
+                           min_heldout=d.ood_min_heldout)
     log("depth5")
     depth5 = sample_split(d.n_depth5, name="depth5", seed_keys=[seed, SPLIT_KEY["depth5"]],
                           depths=(d.depth5,), weights=None, heldout="exclude", cfg=d, max_len=d.max_expr_len)
@@ -340,7 +342,7 @@ def build_sealed(cfg: Config, data_dir: Path, commit: str, log=print) -> dict:
     log("ood_conf")
     ood_conf = sample_split(d.n_ood_conf, name="ood_conf", seed_keys=[seed, SPLIT_KEY["ood_conf"]],
                             depths=d.ood_depths, weights=None, heldout="require", cfg=d,
-                            exclude_hashes=row_hash(ood_dev.tokens), source=1)
+                            exclude_hashes=row_hash(ood_dev.tokens), source=1, min_heldout=d.ood_min_heldout)
     entries = {sp.name: write_split(sp, data_dir / f"{sp.name}.parquet") for sp in (id_conf, ood_conf)}
     manifest = {"prereg_commit": commit, "seed": seed,
                 "seed_derivation": "int(sha256(b'afterimage-sealed:' + commit).hexdigest()[:16], 16)",
@@ -402,8 +404,10 @@ def audit(cfg: Config, data_dir: Path) -> dict:
     out["pool_has_no_heldout_triples"] = (n_bad == 0, f"{n_bad} rows")
     for n in ("ood_dev", "ood_conf"):
         if n in sp:
-            n_bad = int(((sp[n].sig_mask & h_all) == 0).sum())
-            out[f"{n}_all_contain_heldout"] = (n_bad == 0, f"{n_bad} rows lack a held-out triple")
+            k = cfg.data.ood_min_heldout
+            counts = np.array([bin(int(x)).count("1") for x in (sp[n].sig_mask & h_all)])
+            n_bad = int((counts < k).sum())
+            out[f"{n}_all_contain_heldout"] = (n_bad == 0, f"{n_bad} rows have fewer than {k} held-out triple(s)")
     for n in ("id_dev", "id_conf", "depth5", "id_small"):
         if n in sp:
             n_bad = int(((sp[n].sig_mask & h_all) != 0).sum())

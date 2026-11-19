@@ -153,3 +153,15 @@ def test_tiny_config_is_valid(tmp_path):
     from afterimage.config import validate
 
     validate(tiny_config(tmp_path))
+
+
+def test_ood_min_heldout_is_enforced(tmp_path):
+    from afterimage.data.splits import _masks, sample_split
+
+    cfg = tiny_config(tmp_path)
+    d = dataclasses.replace(cfg.data, ood_min_heldout=3)
+    sp = sample_split(200, name="ood", seed_keys=[1, 2], depths=(2, 3, 4), weights=None,
+                      heldout="require", cfg=d, min_heldout=3)
+    hx, hn = _masks(d)
+    counts = [bin(int(m) & (hx | hn)).count("1") for m in sp.sig_mask]
+    assert min(counts) >= 3
