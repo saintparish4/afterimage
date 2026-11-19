@@ -204,3 +204,15 @@ def test_gate_decisions(built_data):
     assert not evaluate_gate(_metrics(0.999, 0.8), rising, g).checks["loss_not_increasing"]["ok"]
     bad = losses + [(5000, float("nan"))]
     assert not evaluate_gate(_metrics(0.999, 0.8), bad, g).passed
+
+
+def test_gate_spike_floor():
+    from afterimage.config import GateConfig
+    from afterimage.train.gate import evaluate_gate
+
+    row = lambda a: {"acc": a, "nll": 0.1}  # noqa: E731
+    m = {"id_small": {"depth1": row(1.0)}, "id_dev": {"all": row(0.999)}, "ood_dev": {"all": row(0.8)}}
+    noisy = [(t, 0.005 if t % 7 else 0.06) for t in range(0, 5000, 10)]  # small noise around a tiny median
+    assert evaluate_gate(m, noisy, GateConfig()).checks["no_loss_spikes"]["ok"]
+    spiky = noisy + [(5000, 2.5)]
+    assert not evaluate_gate(m, spiky, GateConfig()).checks["no_loss_spikes"]["ok"]

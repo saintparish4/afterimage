@@ -133,6 +133,7 @@ class GateConfig:
     ood_acc_high: float = 0.97
     loss_trend_window: int = 2000
     spike_factor: float = 3.0
+    spike_floor: float = 0.5  # a spike must also exceed this absolute loss
 
 
 @dataclass(frozen=True)

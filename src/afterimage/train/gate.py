@@ -56,6 +56,7 @@ def evaluate_gate(metrics: dict[str, dict[str, dict]], losses: list[tuple[int, f
             c["loss_not_increasing"] = _check(res.slope, lo <= 0, "slope 95% CI includes <= 0")
         med = np.median(arr[len(arr) // 10 :, 1]) if len(arr) > 10 else np.median(arr[:, 1])
         tail = arr[len(arr) // 2 :, 1]
-        spikes = int((tail > g.spike_factor * max(med, 1e-8)).sum())
-        c["no_loss_spikes"] = _check(spikes, spikes == 0, f"no loss > {g.spike_factor} x median in second half")
+        spikes = int((tail > max(g.spike_factor * med, g.spike_floor)).sum())
+        c["no_loss_spikes"] = _check(spikes, spikes == 0,
+                                     f"no loss > max({g.spike_factor} x median, {g.spike_floor}) in second half")
     return GateResult(all(v["ok"] for v in c.values()), c)
