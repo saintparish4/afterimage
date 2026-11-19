@@ -12,7 +12,7 @@ name = "confirmatory"
 phase = "confirmatory"
 master_seed = 20270101
 data_seed = 20261118
-prereg_commit = ""
+prereg_commit = "94c23f717ca724a6afedaa3c2f01eb49184f6ff2"
 
 [data]
 pool_size = 4_000_000
