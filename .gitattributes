@@ -1,0 +1,23 @@
+# Normalize line endings: LF in the repository and in the working tree
+# (the project is developed partly under WSL; CRLF would break shell scripts
+# and change file hashes recorded in manifests).
+* text=auto eol=lf
+
+# Language-aware diffs
+*.py    text diff=python
+*.md    text diff=markdown
+*.toml  text
+*.sh    text eol=lf
+
+# Lockfiles: generated, collapse in reviews
+uv.lock linguist-generated=true -diff
+
+# Binary experiment artifacts (should not be committed; see .gitignore)
+*.safetensors binary
+*.parquet     binary
+*.pt          binary
+*.pth         binary
+*.npy         binary
+*.npz         binary
+*.png         binary
+*.pdf         binary
