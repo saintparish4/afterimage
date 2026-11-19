@@ -26,6 +26,7 @@ htmlcov/
 # Checkpoints, generated splits and run logs are released as checksummed
 # artifacts (see docs/blueprint.md §14), not stored in git.
 /runs/
+/runs_remote/
 /artifacts/
 /results/
 /data/generated/
