@@ -46,49 +46,110 @@ def _budget_ok(cfg: Config, budget_hours: float) -> bool:
     return spent + est <= budget_hours
 
 
+TERMINAL = (STATUS_COMPLETE, STATUS_EXCLUDED, STATUS_FAILED)
+
+
+def _lock_path(cfg: Config, b: int) -> Path:
+    return study_dir(cfg) / "locks" / f"block_{b:03d}.lock"
+
+
+def _held_elsewhere(cfg: Config, b: int) -> bool:
+    """True when another worker holds block ``b``'s lock (it is in progress)."""
+    fd = os.open(_lock_path(cfg, b), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def _run_claimed(cfg: Config, b: int, run_one: Callable[[int], dict], device: str,
+                 log: Callable[[str], None]) -> str:
+    start, status = time.time(), "ok"
+    try:
+        info = run_one(b)
+        status = "ok" if info.get("status") in (STATUS_COMPLETE, STATUS_EXCLUDED) else info.get("status", "?")
+    except Exception:
+        status = "error"
+        log(traceback.format_exc())
+    end = time.time()
+    ledger.append_row(study_dir(cfg) / "ledger.csv", ledger.LedgerRow(
+        job_id=uuid.uuid4().hex[:12], phase=cfg.meta.name, block=b, device=device,
+        device_name=_device_name(device), start_unix=start, end_unix=end,
+        device_seconds=end - start, status=status))
+    return status
+
+
+def _try_claim(cfg: Config, b: int) -> int | None:
+    fd = os.open(_lock_path(cfg, b), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    if block_status(cfg, b) in TERMINAL:  # finished while we were looking
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+        return None
+    return fd
+
+
 def worker_loop(cfg: Config, run_one: Callable[[int], dict], *, device: str, blocks: list[int] | None = None,
-                budget_hours: float = 0.0, log: Callable[[str], None] = print) -> list[int]:
-    """Run blocks until the study is full. Returns the blocks this worker ran."""
-    sdir = study_dir(cfg)
-    (sdir / "locks").mkdir(parents=True, exist_ok=True)
-    explicit = blocks is not None
-    candidates = blocks if explicit else list(range(max_block_index(cfg)))
+                budget_hours: float = 0.0, log: Callable[[str], None] = print,
+                poll_seconds: float = 30.0) -> list[int]:
+    """Run blocks until the study is full. Returns the blocks this worker ran.
+
+    In fill mode (``blocks is None``) a worker claims a new block only while
+    passed + in-progress blocks are fewer than ``n_blocks``. If in-progress
+    blocks could fill the study, it waits: one of them may still fail its
+    gate and need replacing. This stops the study overshooting ``n_blocks``.
+    """
+    (study_dir(cfg) / "locks").mkdir(parents=True, exist_ok=True)
     ran: list[int] = []
-    for b in candidates:
-        if not explicit and n_passed(cfg) >= cfg.design.n_blocks:
-            break
-        if block_status(cfg, b) in (STATUS_COMPLETE, STATUS_EXCLUDED, STATUS_FAILED):
-            continue
+
+    def claim_and_run(b: int) -> bool:
         if not _budget_ok(cfg, budget_hours):
             log("device-hour budget reached; not claiming more blocks")
-            break
-        fd = os.open(sdir / "locks" / f"block_{b:03d}.lock", os.O_CREAT | os.O_RDWR, 0o644)
+            return False
+        fd = _try_claim(cfg, b)
+        if fd is None:
+            return True
         try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                continue  # another worker owns it
-            if block_status(cfg, b) in (STATUS_COMPLETE, STATUS_EXCLUDED, STATUS_FAILED):
-                continue
-            start, status = time.time(), "ok"
-            try:
-                info = run_one(b)
-                status = "ok" if info.get("status") in (STATUS_COMPLETE, STATUS_EXCLUDED) else info.get("status", "?")
-            except Exception:
-                status = "error"
-                log(traceback.format_exc())
-            end = time.time()
-            ledger.append_row(sdir / "ledger.csv", ledger.LedgerRow(
-                job_id=uuid.uuid4().hex[:12], phase=cfg.meta.name, block=b, device=device,
-                device_name=_device_name(device), start_unix=start, end_unix=end,
-                device_seconds=end - start, status=status))
+            status = _run_claimed(cfg, b, run_one, device, log)
             ran.append(b)
             if status == "error":
                 raise RuntimeError(f"block {b} raised; see log above (resumable: rerun the same command)")
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
-    return ran
+        return True
+
+    if blocks is not None:
+        for b in blocks:
+            if block_status(cfg, b) not in TERMINAL and not claim_and_run(b):
+                break
+        return ran
+
+    target = cfg.design.n_blocks
+    while True:
+        passed = n_passed(cfg)
+        if passed >= target:
+            return ran
+        open_blocks = [b for b in range(max_block_index(cfg)) if block_status(cfg, b) not in TERMINAL]
+        busy = [b for b in open_blocks if _held_elsewhere(cfg, b)]
+        free = [b for b in open_blocks if b not in busy]
+        if passed + len(busy) >= target or not free:
+            if not busy:
+                log("no more block indices to try")
+                return ran
+            time.sleep(poll_seconds)  # wait to see whether the in-progress blocks pass their gate
+            continue
+        if not claim_and_run(free[0]):
+            return ran
 
 
 def _device_name(device: str) -> str:

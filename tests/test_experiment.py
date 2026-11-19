@@ -128,3 +128,60 @@ def test_budget_stops_claiming(tmp_path, built_data):
                       ledger.LedgerRow("x", cfg.meta.name, 0, "cpu", "cpu", 0, 1, 3600.0, "ok"))
     ran = worker_loop(cfg, lambda b: {"status": "complete"}, device="cpu", budget_hours=1.5, log=lambda *_: None)
     assert ran == []
+
+
+def test_worker_loop_does_not_overshoot_while_blocks_are_in_progress(tmp_path, built_data):
+    import fcntl
+    import os
+    import threading
+
+    cfg = study(built_data, tmp_path, n_blocks=2)
+    locks = layout.study_dir(cfg) / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    # Another worker is running block 0 (it holds the lock and has not finished).
+    fd = os.open(locks / "block_000.lock", os.O_CREAT | os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def fake_run(b):
+        atomic_write_json(layout.block_dir(cfg, b) / "block.json", {"status": layout.STATUS_COMPLETE})
+        return {"status": layout.STATUS_COMPLETE}
+
+    def finish_block0():
+        atomic_write_json(layout.block_dir(cfg, 0) / "block.json", {"status": layout.STATUS_COMPLETE})
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+    timer = threading.Timer(0.5, finish_block0)
+    timer.start()
+    ran = worker_loop(cfg, fake_run, device="cpu", log=lambda *_: None, poll_seconds=0.05)
+    timer.join()
+    # Block 1 runs immediately; the worker then waits for block 0 instead of starting block 2.
+    assert ran == [1]
+    assert layout.block_status(cfg, 2) is None
+
+
+def test_worker_loop_replaces_an_in_progress_block_that_fails_its_gate(tmp_path, built_data):
+    import fcntl
+    import os
+    import threading
+
+    cfg = study(built_data, tmp_path, n_blocks=2)
+    locks = layout.study_dir(cfg) / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    fd = os.open(locks / "block_000.lock", os.O_CREAT | os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def fake_run(b):
+        atomic_write_json(layout.block_dir(cfg, b) / "block.json", {"status": layout.STATUS_COMPLETE})
+        return {"status": layout.STATUS_COMPLETE}
+
+    def exclude_block0():
+        atomic_write_json(layout.block_dir(cfg, 0) / "block.json", {"status": layout.STATUS_EXCLUDED})
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+    timer = threading.Timer(0.5, exclude_block0)
+    timer.start()
+    ran = worker_loop(cfg, fake_run, device="cpu", log=lambda *_: None, poll_seconds=0.05)
+    timer.join()
+    assert ran == [1, 2]
