@@ -1,0 +1,51 @@
+# Confirmatory run (milestones M6-M8). Every value marked <pilot> must be
+# replaced from `afterimage calibrate` output, this file committed together
+# with prereg/preregistration.md, and that commit's hash written into
+# meta.prereg_commit in a follow-up commit. Only then can
+# `afterimage data seal` create the sealed test sets.
+#
+# The [data] section and data_seed must stay identical to pilot.toml so both
+# phases train on the same pool.
+
+[meta]
+name = "confirmatory"
+phase = "confirmatory"
+master_seed = 20270101
+data_seed = 20261118
+prereg_commit = ""
+
+[data]
+pool_size = 4_000_000
+heldout_x = [["I", 1, "X"], ["A", 2, "X"], ["X", 1, "O"]]
+heldout_nonx = [["I", 2, "A"], ["O", 1, "I"], ["A", 1, "N"]]
+heldout_reserve = [["O", 2, "X"], ["X", 2, "I"], ["N", 1, "O"], ["I", 1, "N"]]
+
+[model]
+layers = 4
+d_model = 128
+heads = 4
+d_ff = 512
+
+[optim]
+lr = 5e-4
+warmup = 1000
+batch = 256
+
+[design]
+n_blocks = 35      # <pilot> from the power analysis
+T0 = 30_000        # <pilot>
+K = 2_000          # <pilot>
+H = 20_000         # <pilot>
+horizons = [0, 1250, 2500, 5000, 10000, 20000]
+R = 300
+arms = ["C", "I", "N", "S"]
+hybrids = true
+
+[analysis]
+eps_id_nll = nan       # <pilot>
+eps_id_aff_nll = nan   # <pilot>
+eps_id_acc = 0.002     # floor; raised if the pilot's N-vs-C spread is larger
+delta_G = nan          # <pilot>
+
+[runtime]
+device = "cuda"

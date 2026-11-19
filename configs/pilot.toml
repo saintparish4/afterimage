@@ -1,0 +1,40 @@
+# Pilot (milestone M5). Uses only the dev splits. Its job is to fix T0, K, H
+# and the gate thresholds, and to calibrate the margins and sample size with
+# `afterimage calibrate`. Pilot effect estimates are exploratory and are never
+# pooled with confirmatory data.
+
+[meta]
+name = "pilot"
+phase = "pilot"
+master_seed = 20261118
+data_seed = 20261118
+
+[data]
+pool_size = 4_000_000
+heldout_x = [["I", 1, "X"], ["A", 2, "X"], ["X", 1, "O"]]
+heldout_nonx = [["I", 2, "A"], ["O", 1, "I"], ["A", 1, "N"]]
+heldout_reserve = [["O", 2, "X"], ["X", 2, "I"], ["N", 1, "O"], ["I", 1, "N"]]
+
+[model]
+layers = 4
+d_model = 128
+heads = 4
+d_ff = 512
+
+[optim]
+lr = 5e-4
+warmup = 1000
+batch = 256
+
+[design]
+n_blocks = 8
+T0 = 30_000        # <pilot>
+K = 2_000          # <pilot>
+H = 20_000         # <pilot>
+horizons = [0, 1250, 2500, 5000, 10000, 20000]
+R = 300
+arms = ["C", "I", "N", "S"]
+hybrids = true
+
+[runtime]
+device = "cuda"

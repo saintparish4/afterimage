@@ -1,0 +1,65 @@
+# Smoke test: exercises every code path end to end on CPU in a few minutes.
+# The model is far too small to pass the learnability gate, so the gate is
+# recorded but not enforced. Smoke results carry no scientific meaning.
+
+[meta]
+name = "smoke"
+phase = "smoke"
+master_seed = 1
+data_seed = 1
+
+[data]
+pool_size = 20_000
+chunk_size = 5_000
+n_id_dev = 1_000
+n_ood_dev = 1_000
+n_id_conf = 1_000
+n_ood_conf = 1_000
+n_depth5 = 300
+n_probe_id = 128
+n_probe_ood = 128
+heldout_x = [["I", 1, "X"], ["A", 2, "X"], ["X", 1, "O"]]
+heldout_nonx = [["I", 2, "A"], ["O", 1, "I"], ["A", 1, "N"]]
+
+[model]
+layers = 2
+d_model = 32
+heads = 2
+d_ff = 64
+
+[optim]
+lr = 3e-3
+warmup = 50
+batch = 64
+
+[design]
+n_blocks = 3
+T0 = 300
+K = 60
+H = 200
+horizons = [0, 25, 50, 100, 200]
+base_checkpoints = 6
+R = 40
+relearn_eval_every = 10
+resume_every = 100
+hybrids = true
+
+[gate]
+enforce = false
+
+[eval]
+batch = 1024
+log_every = 5
+dyn_every = 20
+nu_every = 100
+
+[analysis]
+eps_id_nll = 0.05
+eps_id_aff_nll = 0.10
+delta_G = 0.05
+n_bootstrap = 2_000
+n_min = 2
+
+[runtime]
+device = "cpu"
+threads = 2
