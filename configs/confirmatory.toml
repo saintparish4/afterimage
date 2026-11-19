@@ -1,8 +1,8 @@
-# Confirmatory run (milestones M6-M8). Every value marked <pilot> must be
-# replaced from `afterimage calibrate` output, this file committed together
-# with prereg/preregistration.md, and that commit's hash written into
-# meta.prereg_commit in a follow-up commit. Only then can
-# `afterimage data seal` create the sealed test sets.
+# Confirmatory run (milestones M6-M8). Values were filled from
+# `afterimage calibrate` on the pilot (results/pilot/calibration.json) and
+# frozen together with prereg/preregistration.md. That commit's hash is
+# recorded in meta.prereg_commit; `afterimage data seal` derives the sealed
+# test sets from it.
 #
 # The [data] section and data_seed must stay identical to pilot.toml so both
 # phases train on the same pool.
@@ -35,20 +35,20 @@ warmup = 1000
 batch = 256
 
 [design]
-n_blocks = 35      # <pilot> from the power analysis
-T0 = 50_000        # <pilot>; 30k left depth 4 below 99% in 2 of 4 blocks
-K = 2_000          # <pilot>
-H = 20_000         # <pilot>
+n_blocks = 16      # resource-limited; the pilot power analysis asked for 68 (see prereg §5)
+T0 = 50_000
+K = 2_000
+H = 20_000
 horizons = [0, 1250, 2500, 5000, 10000, 20000]
 R = 300
 arms = ["C", "I", "N", "S"]
 hybrids = true
 
 [analysis]
-eps_id_nll = nan       # <pilot>
-eps_id_aff_nll = nan   # <pilot>
-eps_id_acc = 0.002     # floor; raised if the pilot's N-vs-C spread is larger
-delta_G = nan          # <pilot>
+eps_id_nll = 0.000347913      # pilot calibration
+eps_id_aff_nll = 0.000800566  # pilot calibration
+eps_id_acc = 0.002            # floor (pilot N-vs-C spread was smaller)
+delta_G = 0.00401223          # pilot calibration
 
 [gate]
 # Pilot gate run 2 (2026-11-19): seeds that learned the familiar task best also
