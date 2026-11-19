@@ -14,6 +14,9 @@ pool_size = 4_000_000
 heldout_x = [["I", 1, "X"], ["A", 2, "X"], ["X", 1, "O"]]
 heldout_nonx = [["I", 2, "A"], ["O", 1, "I"], ["A", 1, "N"]]
 heldout_reserve = [["O", 2, "X"], ["X", 2, "I"], ["N", 1, "O"], ["I", 1, "N"]]
+# Pilot gate run 1 (2026-11-19): with 1 held-out triple per example, held-out
+# accuracy sat at the ceiling (97-99%). Examples with >= 3 were 91-98%.
+ood_min_heldout = 3
 
 [model]
 layers = 4
@@ -28,7 +31,7 @@ batch = 256
 
 [design]
 n_blocks = 8
-T0 = 30_000        # <pilot>
+T0 = 50_000        # <pilot>; 30k left depth 4 below 99% in 2 of 4 blocks
 K = 2_000          # <pilot>
 H = 20_000         # <pilot>
 horizons = [0, 1250, 2500, 5000, 10000, 20000]
