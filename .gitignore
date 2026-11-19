@@ -25,10 +25,10 @@ htmlcov/
 # --- Experiment outputs ------------------------------------------------------
 # Checkpoints, generated splits and run logs are released as checksummed
 # artifacts (see docs/blueprint.md §14), not stored in git.
-runs/
-artifacts/
-results/
-data/generated/
+/runs/
+/artifacts/
+/results/
+/data/generated/
 *.safetensors
 *.pt
 *.pth
