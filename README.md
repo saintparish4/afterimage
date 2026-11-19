@@ -17,127 +17,161 @@ results are possible, and all three are publishable outcomes: the effect is
 detected, it is bounded by an equivalence test, or the study shows that it
 could not be resolved.
 
-> **Status: design stage.** No code has been written yet. The full research
-> and engineering design is in [`docs/blueprint.md`](docs/blueprint.md).
-> Commands below are the planned interface.
+> **Status: implemented, not yet run at scale.** The full pipeline is built
+> and tested end to end on CPU: language and oracles, dataset, model,
+> forkable training, the paired experiment, the pre-registered analysis,
+> diagnostics and replication tooling. The pilot and the confirmatory study
+> need a GPU and have **not** been run, so there are no results yet. The
+> research design is in [`docs/blueprint.md`](docs/blueprint.md).
 
 ---
 
 ## The experiment in one paragraph
 
-A small decoder-only Transformer (about 0.8M parameters) is trained from
-scratch on a deterministic Boolean expression language in postfix notation.
-The language has the operators `N`, `A`, `O`, `I` and `X`, where the target
-operator `X` means XOR. Each *paired seed block* trains a base model, saves its
-complete training state (weights, AdamW moments, scheduler, RNG, step), and
-forks it into four arms with identical inputs and step counts:
+A small decoder-only Transformer (0.80M parameters) is trained from scratch
+on a deterministic Boolean expression language in postfix notation. The
+language has the operators `N`, `A`, `O`, `I` and `X`, where the target
+operator `X` means XOR. Each *paired seed block* trains a base model,
+checks a pre-treatment learnability gate, saves its complete training state
+(weights, AdamW moments, RNG, step), and forks it into arms with identical
+inputs and step counts:
 
-| Arm | What it gets during the intervention window | Purpose |
+| Arm | During the intervention window | Purpose |
 |---|---|---|
 | **C** control | correct labels | reference |
 | **I** intervention | `X` supervised as **XNOR** for K steps | the treatment |
 | **N** nuisance placebo | correct labels, different data order | measures generic perturbation |
-| **S** matched noise | the same number of flipped labels per batch as I, chosen at random | coherent rule vs. noise |
+| **S** matched noise | the same number of flipped labels per batch as I, at random | coherent rule vs. noise |
+| hybrids (exploratory) | I's weights with C's optimizer state, and the reverse | where the effect is carried |
 
-All arms then receive identical corrective training. The primary endpoint is
-the paired I−C difference in NLL on a sealed held-out set. That set contains
-operator adjacencies (parent, slot, child) that never appear in training, and
-the difference is measured only after familiar-task equivalence has been
-established by a TOST.
+All arms then receive identical corrective training. The primary endpoint
+is the paired I−C difference in NLL on a sealed held-out set of operator
+adjacencies (parent, slot, child) that never occur in training. It is
+interpreted only once familiar-task equivalence has been established by a
+TOST.
+
+## Quick start (CPU)
+
+Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned.
+
+```bash
+uv sync --frozen --extra cpu                      # or --extra cu130 on a GPU machine
+uv run pytest                                     # fast suite
+uv run pytest -m slow                             # exhaustive oracle check (10.5M trees) + end-to-end runs
+
+C="--config configs/smoke.toml"
+uv run afterimage data build  $C                  # deterministic, checksummed splits
+uv run afterimage data audit  $C                  # exact leakage audit
+uv run afterimage replay      $C --steps 200      # bitwise replay + resume on this device
+uv run afterimage run         $C                  # 3 paired blocks (~6 min on a laptop CPU)
+uv run afterimage analyze     $C --audit          # -> results/smoke/dev/report.md
+```
+
+The smoke model is far too small to learn the task, so its outcome is
+expected to be uninformative (it reports "correction incomplete"). It exists
+to exercise every code path.
+
+## Running the study (GPU)
+
+```bash
+P="--config configs/pilot.toml"
+uv run afterimage data build $P && uv run afterimage replay $P --device cuda
+uv run afterimage launch $P --devices cuda:0 --workers-per-device 2 --budget-gpu-hours 10
+uv run afterimage analyze $P && uv run afterimage calibrate $P   # margins + n for the confirmatory run
+```
+
+Then fill `prereg/preregistration.md` and `configs/confirmatory.toml` from
+`results/pilot/calibration.json`, and commit them. Next, write that commit's
+hash into `meta.prereg_commit` and commit again. After that:
+
+```bash
+F="--config configs/confirmatory.toml"
+uv run afterimage data seal $F          # sealed test sets, seeded by the prereg commit
+uv run afterimage replay $F --device cuda
+uv run afterimage launch $F --devices cuda:0 --workers-per-device 2
+uv run afterimage evaluate-sealed $F
+uv run afterimage analyze $F --confirmatory     # runs once; refuses on a dirty tree or a changed design
+```
+
+`scripts/run_then_shutdown.sh` wraps `launch` for on-demand nodes, and the
+`Dockerfile` provides a digest-pinned environment. Expected cost: by current
+estimates, single-digit to low-double-digit GPU-hours on one GPU
+(blueprint §11). This is to be confirmed by measurement.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `data build / verify / audit / seal` | build splits; check hashes; exact leakage audit; sealed confirmatory sets |
+| `replay` | check bitwise replay and kill-and-resume on this device |
+| `run` / `launch` | run blocks in-process / spawn workers across GPUs (file locks, budget guard, ledger) |
+| `evaluate-sealed` | predict the sealed splits from saved horizon checkpoints |
+| `analyze [--confirmatory]` | pre-registered analysis and outcome category (A1/A2/A/B/C/D) |
+| `calibrate` | pilot-only: equivalence margins, smallest effect of interest, sample size |
+| `diagnose` | exploratory CKA, barriers, activation patching, gradient alignment, TracIn |
+| `reproduce-r1` | rerun forks from released fork states and require identical bits |
+| `status` / `audit` | block statuses and device-hours; data, leakage, determinism and Stage A checks |
 
 ## Design principles
 
 - **One experiment, studied in depth.** No general-purpose framework.
-- **Exact counterfactuals.** Deterministic forks of a single saved state
-  produce unit-level effects that are computed, not estimated. Replay and
-  resume are tested bit for bit.
+- **Exact counterfactuals.** Arms fork a single saved state, and batches are
+  a pure function of the step, so unit-level effects are computed, not
+  estimated. Replay and crash-resume are tested bit for bit.
 - **Pre-registration.** The endpoint, horizon, margins and sample size are
-  fixed before confirmatory data exist. The confirmatory test set's seed is
-  derived from the commit hash of the frozen pre-registration.
+  fixed before confirmatory data exist. The sealed test set's seed comes
+  from the commit hash of the frozen pre-registration.
 - **Controls for the obvious failure modes.** A placebo arm, a matched-noise
-  arm, equivalence on the subset of familiar examples the false rule affects,
-  and a held-out subset where the true and false rules agree. Together these
-  separate a real afterimage from incomplete correction.
-- **Behavior first.** CKA, TracIn, probes and activation patching are
-  secondary diagnostics. They are never the evidence for the main claim.
-- **Minimal compute.** The whole confirmatory study is estimated at a few
-  GPU-hours on one GPU. The estimate is replaced by measured throughput before
-  scaling.
+  arm, equivalence on the familiar examples the false rule affects, and a
+  held-out subset where both rules agree. Together they separate a real
+  afterimage from incomplete correction.
+- **Behavior first.** Representation and attribution diagnostics are
+  secondary, are always compared with the placebo, and cannot change the
+  outcome category.
 
-## Repository layout (planned)
+## Repository layout
 
 ```
-configs/          smoke / pilot / confirmatory TOML configs
-prereg/           frozen pre-registration (its commit seeds the sealed test set)
+configs/          smoke / pilot / confirmatory
+prereg/           the pre-registration (template until the pilot fills it)
+scripts/          reproduce.sh (smoke | r1 | r2), run_then_shutdown.sh
 src/afterimage/
-  lang/           grammar, two independent reference interpreters, generator, intervention
-  data/           split builder (Parquet + SHA-256 manifest), stateless batch schedule
+  lang/           grammar, three independent interpreters, generator, enumerator
+  data/           split builder (Parquet + SHA-256 manifest, audit, sealed sets), batch schedule
   model/          decoder-only Transformer
-  train/          TrainState serialization (safetensors), fork, loop, determinism, gate
-  experiment/     arms and windows, per-block runner, file-lock launcher
-  eval/           metrics, probes, Stage A/B/C checks
-  analysis/       endpoints, paired tests, TOST, bootstrap, Holm, power
-  diagnostics/    CKA, interpolation barriers, activation patching, TracIn, hybrid forks
-  artifacts/      hashing, manifests, environment capture, GPU-hour ledger
-tests/            exhaustive + property-based oracle tests, determinism tests
-docs/             blueprint, environment, measured throughput, limitations
+  train/          arms and batch plans, checkpoints and forks, deterministic step, gate
+  eval/           predictions, metrics, subsets, Stage A/B checks
+  experiment/     per-block runner, launcher, replay checks, sealed evaluation
+  analysis/       endpoints, paired statistics, classification, calibration, report
+  diagnostics/    CKA, barriers, activation patching, TracIn
+  artifacts/      hashing, environment capture, device-hour ledger
+tests/            mirrors src/; `-m slow` for exhaustive and end-to-end checks
+docs/             blueprint, environment, measured throughput
 ```
-
-## Planned workflow
-
-Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). CUDA is optional:
-every correctness test runs on CPU.
-
-```bash
-uv sync --frozen
-afterimage data build  --config configs/smoke.toml --verify
-afterimage test        --all
-afterimage run         --config configs/smoke.toml --blocks all   # CPU, minutes
-afterimage analyze     --config configs/smoke.toml --out results/
-afterimage audit       --results results/
-```
-
-`--confirmatory` analysis refuses to run on a dirty tree, on a config that
-does not match the pre-registration, or a second time.
-
-## Roadmap
-
-Milestones are ordered by scientific dependency, not by feature count. Each
-milestone has acceptance criteria and failure conditions in the blueprint
-(§13).
-
-1. Validate the grammar and the reference interpreters, with exhaustive
-   checks up to depth 3.
-2. Establish a learnable Transformer baseline that passes the gate.
-3. Exact checkpoint forks: bit-identical replay and resume.
-4. Confirm that the false supervision has its intended immediate effect.
-5. Pilot the design, then freeze the pre-registration.
-6. Run the confirmatory corrective-training experiment.
-7. Evaluate familiar-task equivalence and held-out generalization on the
-   sealed sets.
-8. Estimate uncertainty across seed blocks and classify the outcome.
-9. Representation diagnostics, as secondary evidence.
-10. Package everything for independent replication.
 
 ## Reproducibility
 
-Planned releases include source code at a tagged commit, `uv.lock` and a
-container digest, frozen configs and the pre-registration, dataset manifests
-with checksums, fork and intermediate checkpoints (weights, optimizer and RNG
-state), training logs, raw per-example evaluation results, analysis scripts,
-and the GPU-hour ledger.
+The project's releases will include source code at a tagged commit,
+`uv.lock` and the container digest, frozen configs and the pre-registration,
+dataset manifests with checksums, fork and intermediate checkpoints
+(weights, optimizer and RNG state), logs, per-example predictions, analysis
+outputs and the device-hour ledger. Replication is defined in three tiers:
 
-Replication is defined in three tiers: bitwise replay, a same-design rerun,
-and an independent rerun. Each tier has explicit success, partial and failure
-criteria (blueprint §14).
+1. **R1, bitwise.** Rerun forks from the released fork states (`reproduce-r1`).
+2. **R2, same-design rerun.** Rerun the whole study with the released seeds.
+3. **R3, independent rerun.** Use a fresh master seed, other hardware, or a
+   reimplementation.
+
+Each tier has explicit success, partial and failure criteria (blueprint
+§14).
 
 ## Limitations
 
-The project uses one synthetic language, one target operator, one false rule,
-one model size, and a finite correction horizon. Claims are scoped to that
-design. A study this size cannot say whether the result transfers to
-pretrained or large models, and it cannot certify that information was erased.
-See blueprint §15.
+The project uses one synthetic language, one target operator, one false
+rule, one model size, and a finite correction horizon. Claims are scoped to
+that design. A study this size cannot say whether the result transfers to
+pretrained or large models, and it cannot certify that information was
+erased. See blueprint §15.
 
 ## License
 
