@@ -3,6 +3,8 @@ name = "afterimage"
 version = "0.1.0"
 description = "A counterfactual laboratory for training-history dependence in neural networks"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=2.0",

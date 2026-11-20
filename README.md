@@ -207,5 +207,4 @@ erased. See blueprint §15.
 
 ## License
 
-No license has been chosen yet. Until one is added, all rights are reserved
-by the author.
+Copyright 2026 Sharif Parish. Licensed under the [Apache License, Version 2.0](LICENSE).
