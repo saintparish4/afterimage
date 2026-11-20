@@ -1,6 +1,6 @@
 [project]
 name = "afterimage"
-version = "0.1.0"
+version = "1.0.0"
 description = "A counterfactual laboratory for training-history dependence in neural networks"
 readme = "README.md"
 license = "Apache-2.0"
